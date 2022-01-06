@@ -14,8 +14,10 @@ library(DT)
 library(dplyr)
 library(edgeR)
 
+source('kmplot.R')
+
 SAMPLES_TO_KEEP <- '01A'
-DEFAULT_GENE <- 'TP53'
+DEFAULT_GENE <- 'SCD'
 
 MyXenaData <- dplyr::filter(XenaData, grepl('GDC TCGA', XenaCohorts)) %>%
               dplyr::filter(Label == "HTSeq - Counts" | Label == "survival data")
@@ -30,7 +32,7 @@ ui <- bootstrapPage(
         navbarPage('UCSC Xena Analyzer', 
                    tabPanel('Data',
                             h3("Data selection"),
-                            selectInput('selectedCohort', label = 'Selected Data: ', choices = unique(MyXenaData$XenaCohorts),
+                            selectInput('selectCohort', label = 'Selected Data: ', choices = unique(MyXenaData$XenaCohorts),
                                         width = "30%"), br(),
                             dataTableOutput("XenaData")
                    ),
@@ -54,6 +56,10 @@ ui <- bootstrapPage(
                                 ), div(style = 'display:inline-block; width: 25%',
                                     selectizeInput('selectProbe', 'Select Probe', choices = 1:2)
                                 )
+                            ),
+                            
+                            fluidRow(column(1), 
+                                column(6, plotOutput('km'))
                             )
                     )
         
@@ -64,14 +70,23 @@ ui <- bootstrapPage(
 server <- function(session, input, output) {
     print("running server...")
     
+    #####################
+    # reactives
+    #####################
+    
+    reactiveProbeMap <- reactiveVal()
+    reactiveLogCPM <- reactiveVal()
+    reactiveSurvival <- reactiveVal()
+    
+    
     get_survival_data <- function() {
-        rds_file = paste0('cache/', input$selectedCohort, '_survival.rds')
+        rds_file = paste0('cache/', input$selectCohort, '_survival.rds')
         if (file.exists(rds_file)) {
             return(readRDS(rds_file))    
         }
         
         # limit to desired cohort
-        blca <- MyXenaData %>% filter(XenaCohorts == input$selectedCohort)
+        blca <- MyXenaData %>% filter(XenaCohorts == input$selectCohort)
         
         # Get the phenotype / clinical data
         cli_query = blca %>%
@@ -87,13 +102,13 @@ server <- function(session, input, output) {
     }
     
     get_count_data <- function() {
-        rds_file = paste0('cache/', input$selectedCohort, '_counts.rds')
+        rds_file = paste0('cache/', input$selectCohort, '_counts.rds')
         if (file.exists(rds_file)) {
             return(readRDS(rds_file))    
         }
         
         # limit to desired cohort
-        blca <- MyXenaData %>% filter(XenaCohorts == input$selectedCohort)
+        blca <- MyXenaData %>% filter(XenaCohorts == input$selectCohort)
         
         # Get the RNA-seq data, including the "probe map"
         cli_query <- blca %>% filter(Label == 'HTSeq - Counts') %>%
@@ -181,15 +196,15 @@ server <- function(session, input, output) {
         
     }
     
-    output$XenaData <- DT::renderDT(MyXenaData %>% dplyr::filter(XenaCohorts == input$selectedCohort))
+    output$XenaData <- DT::renderDT(MyXenaData %>% dplyr::filter(XenaCohorts == input$selectCohort))
     
     output$confirmCohort <- renderUI({
         HTML('<p>Click button to download:',
-             '<span style = "color:red">', input$selectedCohort, '</span>', 
+             '<span style = "color:red">', input$selectCohort, '</span>', 
              '(', SAMPLES_TO_KEEP, ')</p>')
         })
     
-    probeMap <- reactiveVal()
+    
     
     observeEvent(input$downloadCohort, {
 
@@ -203,7 +218,7 @@ server <- function(session, input, output) {
         
         X <- blca_counts$counts
         
-        probeMap(blca_counts$probeMap)
+        reactiveProbeMap(blca_counts$probeMap)
         
         # output bar code types
         { 
@@ -229,7 +244,7 @@ server <- function(session, input, output) {
         
         showNotification(id = 'progress', 'processing data...', type = 'message')        
         
-        rds_file = paste0('cache/', input$selectedCohort, 
+        rds_file = paste0('cache/', input$selectCohort, 
                           '_', paste0(SAMPLES_TO_KEEP, collapse = '_'),
                           '.rds')
         
@@ -241,13 +256,15 @@ server <- function(session, input, output) {
         }
         
         output$SurvivalData <- DT::renderDT(L$survival)
-        #output$CountData <- DT::renderDT(L$logCPM)
            
-        pm <- probeMap()
-        probeMap(pm[pm$id %in% rownames(L$logCPM),])
+        reactiveLogCPM(L$logCPM)
+        reactiveSurvival(L$survival)
+        
+        pm <- reactiveProbeMap()
+        reactiveProbeMap(pm[pm$id %in% rownames(L$logCPM),])
         showNotification(id = 'progress', 'Getting available genes', type = 'message')
 
-        genes <-  probeMap()$gene %>% unique() %>% sort()
+        genes <-  reactiveProbeMap()$gene %>% unique() %>% sort()
         
         updateSelectizeInput(session, 'selectGene', 'Select Gene', 
                              selected = DEFAULT_GENE,
@@ -258,13 +275,11 @@ server <- function(session, input, output) {
     })
 
     observeEvent(input$selectGene, {
-        pm <- probeMap()
+        pm <- reactiveProbeMap()
         
         if (is.null(pm)) {
             return()
         }
-        
-        print(head(pm))
         
         keep <- pm$gene %in% input$selectGene
         probes <- pm$id[keep]
@@ -274,7 +289,36 @@ server <- function(session, input, output) {
         
         
     }, ignoreNULL = TRUE, ignoreInit = TRUE)
+ 
     
+    observeEvent(input$selectProbe, {
+        print('changed probe')
+        
+        pm <- reactiveProbeMap()
+        logCPM <- reactiveLogCPM()
+        survival <- reactiveSurvival()
+        
+        #save(pm, logCPM, survival, file = 'look.RData')
+        
+        if (is.null(pm) | is.null(logCPM) | is.null(survival)) {
+            return()
+        }
+        
+        m <- match(input$selectProbe, rownames(logCPM))
+        
+        x <- as.double(logCPM[m,])
+        
+        output$km <- renderPlot({
+        
+            plot.shiny.km(survival$OS.time, survival$OS, x, 
+                          paste0(input$selectCohort, ': ', input$selectGene, 
+                                 '(', input$selectProbe, ')'),
+                          col = c('darkblue', 'darkred')
+            )
+            
+        })
+    }, ignoreInit = TRUE, ignoreNULL = TRUE)
+       
 }
 
 
