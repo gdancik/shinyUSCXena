@@ -16,7 +16,7 @@ library(edgeR)
 
 source('kmplot.R')
 
-SAMPLES_TO_KEEP <- '01A'
+SAMPLES_TO_KEEP <- NULL
 DEFAULT_GENE <- 'SCD'
 
 MyXenaData <- dplyr::filter(XenaData, grepl('GDC TCGA', XenaCohorts)) %>%
@@ -32,8 +32,21 @@ ui <- bootstrapPage(
         navbarPage('UCSC Xena Analyzer', 
                    tabPanel('Data',
                             h3("Data selection"),
-                            selectInput('selectCohort', label = 'Selected Data: ', choices = unique(MyXenaData$XenaCohorts),
-                                        width = "30%"), br(),
+                            
+                            div(
+                                div(style = 'display:inline-block; width: 30%',
+                                    selectInput('selectCohort', label = 'Selected Data: ', 
+                                        choices = unique(MyXenaData$XenaCohorts))
+                                ), div(style = 'display:inline-block; width: 30%',
+                                    selectInput('selectSampleType', label = 'Selected Sample Type: ', 
+                                        choices = c('01A', '11A'))
+                                    )
+                            ),
+                            
+                            br(),
+                            
+                            
+                            
                             dataTableOutput("XenaData")
                    ),
                    tabPanel('Download and Process',
@@ -200,14 +213,15 @@ server <- function(session, input, output) {
     
     output$confirmCohort <- renderUI({
         HTML('<p>Click button to download:',
-             '<span style = "color:red">', input$selectCohort, '</span>', 
-             '(', SAMPLES_TO_KEEP, ')</p>')
+             '<span style = "color:red">', input$selectCohort, '</span></p>')
         })
     
     
     
     observeEvent(input$downloadCohort, {
 
+        SAMPLES_TO_KEEP <<- input$selectSampleType
+        
         showNotification(id = 'progress', 'getting survival data...', type = 'message')
         blca_survival <- get_survival_data()
 
@@ -310,10 +324,17 @@ server <- function(session, input, output) {
         
         output$km <- renderPlot({
         
+            if (grepl('01', SAMPLES_TO_KEEP)) {
+                type <- ' (tumor)'
+            } else if (grepl('11', SAMPLES_TO_KEEP)) {
+                type <- ' (normal)'
+            }
+
+            title <- paste0(input$selectCohort, type, '\n',
+                            input$selectGene, 
+                   ' (', input$selectProbe, ')')
             plot.shiny.km(survival$OS.time, survival$OS, x, 
-                          paste0(input$selectCohort, ': ', input$selectGene, 
-                                 '(', input$selectProbe, ')'),
-                          col = c('darkblue', 'darkred')
+                          title, col = c('darkblue', 'darkred')
             )
             
         })

@@ -92,8 +92,8 @@ plot.shiny.km <- function(time, death, x, title = "", ids = NULL,
   km.group = ggsurv(km.group1, 
                     main = title, 
                     surv.col = col, cens.col = col, xlab = xlab, ylab = ylab, size.est = lwd, ...) +
-    ggplot2::coord_cartesian(ylim = c(0, 1))
-  km.group = km.group + theme_linedraw()
+    ggplot2::coord_cartesian(ylim = c(0, 1)) + theme_classic()
+  
   if (!LEGEND) {
     km.group = km.group + theme(legend.position = "none") 
   }
