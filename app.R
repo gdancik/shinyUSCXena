@@ -16,7 +16,7 @@ library(edgeR)
 
 source('kmplot.R')
 
-SAMPLES_TO_KEEP <- NULL
+SAMPLES_TO_KEEP <- '01A'
 DEFAULT_GENE <- 'SCD'
 
 MyXenaData <- dplyr::filter(XenaData, grepl('GDC TCGA', XenaCohorts)) %>%
@@ -36,10 +36,10 @@ ui <- bootstrapPage(
                             div(
                                 div(style = 'display:inline-block; width: 30%',
                                     selectInput('selectCohort', label = 'Selected Data: ', 
-                                        choices = unique(MyXenaData$XenaCohorts))
+                                        choices = sort(unique(MyXenaData$XenaCohorts)))
                                 ), div(style = 'display:inline-block; width: 30%',
                                     selectInput('selectSampleType', label = 'Selected Sample Type: ', 
-                                        choices = c('01A', '11A'))
+                                        choices = c('01A', '11A', '03A'))
                                     )
                             ),
                             
@@ -187,6 +187,7 @@ server <- function(session, input, output) {
         
         # first create a Digital Gene Expression (DGE) list object,
         # which contains counts and library size information
+        
         dge <- DGEList(counts=X)
         
         # remove genes with low counts, since these should not
@@ -324,7 +325,7 @@ server <- function(session, input, output) {
         
         output$km <- renderPlot({
         
-            if (grepl('01', SAMPLES_TO_KEEP)) {
+            if (grepl('01|03', SAMPLES_TO_KEEP)) {
                 type <- ' (tumor)'
             } else if (grepl('11', SAMPLES_TO_KEEP)) {
                 type <- ' (normal)'
